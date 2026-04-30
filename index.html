@@ -1,23 +1,18 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Neon Arena Online</title>
+    <title>NEON DUEL PRO</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #050505; font-family: 'Courier New', Courier, monospace; }
-        #ui { position: absolute; top: 20px; left: 20px; color: #00ff88; pointer-events: none; text-shadow: 0 0 10px #00ff88; z-index: 10; }
-        #leaderboard { position: absolute; top: 20px; right: 20px; color: #ff00ff; text-align: right; text-shadow: 0 0 10px #ff00ff; z-index: 10; }
-        .death-flash { position: absolute; inset: 0; background: red; opacity: 0; pointer-events: none; transition: opacity 0.3s; z-index: 5; }
+        body { margin: 0; overflow: hidden; background: #020205; font-family: 'Segoe UI', sans-serif; }
+        #ui { position: absolute; top: 20px; left: 20px; color: #0ff; pointer-events: none; letter-spacing: 2px; }
+        #leaderboard { position: absolute; top: 20px; right: 20px; color: #f0f; text-align: right; background: rgba(255,0,255,0.1); padding: 10px; border-radius: 5px; border: 1px solid #f0f; }
+        .death-flash { position: absolute; inset: 0; background: white; opacity: 0; pointer-events: none; z-index: 100; }
     </style>
 </head>
 <body>
     <div id="flash" class="death-flash"></div>
-    <div id="ui">
-        ONLINE: <span id="count">0</span><br>
-        WASD to Move | CLICK/SPACE to Shoot
-    </div>
-    <div id="leaderboard">
-        LEADERBOARD<br><div id="list"></div>
-    </div>
+    <div id="ui">SYSTEM ONLINE // <span id="count">0</span> USERS</div>
+    <div id="leaderboard"><strong>TOP STRIKERS</strong><div id="list"></div></div>
     <canvas id="g"></canvas>
 
     <script src="/socket.io/socket.io.js"></script>
@@ -31,34 +26,49 @@
         let mousePos = { x: 0, y: 0 };
         let players = {};
         const keys = {};
+        let particles = [];
+        let screenShake = 0;
         let shootCooldown = 0;
-        let frameCount = 0;
 
-        function resize() {
-            canvas.width = window.innerWidth;
-            canvas.height = window.innerHeight;
-        }
+        function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
         window.addEventListener('resize', resize);
         resize();
 
-        socket.on('updatePlayers', (data) => { 
-            players = data; 
-            document.getElementById('count').innerText = Object.keys(data).length;
-            updateLeaderboard();
-        });
-
-        // SYNC FIX: Update local position when server respawns you
-        socket.on('respawn', (newPos) => {
-            myPos.x = newPos.x;
-            myPos.y = newPos.y;
-            flash.style.opacity = '0.5';
-            setTimeout(() => flash.style.opacity = '0', 100);
-        });
-
-        function updateLeaderboard() {
-            const sorted = Object.values(players).sort((a, b) => b.kills - a.kills).slice(0, 5);
-            document.getElementById('list').innerHTML = sorted.map(p => `${p.name}: ${p.kills}`).join('<br>');
+        // Particle Class for Polish
+        class Particle {
+            constructor(x, y, color) {
+                this.x = x; this.y = y;
+                this.vx = (Math.random() - 0.5) * 10;
+                this.vy = (Math.random() - 0.5) * 10;
+                this.alpha = 1;
+                this.color = color;
+            }
+            update() { this.x += this.vx; this.y += this.vy; this.alpha -= 0.02; }
+            draw() {
+                ctx.globalAlpha = this.alpha;
+                ctx.fillStyle = this.color;
+                ctx.fillRect(this.x, this.y, 3, 3);
+                ctx.globalAlpha = 1;
+            }
         }
+
+        socket.on('updatePlayers', data => { 
+            players = data;
+            document.getElementById('count').innerText = Object.keys(data).length;
+            const sorted = Object.values(players).sort((a,b)=>b.kills-a.kills).slice(0,5);
+            document.getElementById('list').innerHTML = sorted.map(p=>`<br>${p.name}: ${p.kills}`).join('');
+        });
+
+        socket.on('impact', data => {
+            for(let i=0; i<8; i++) particles.push(new Particle(data.x, data.y, data.color));
+        });
+
+        socket.on('respawn', data => {
+            myPos.x = data.x; myPos.y = data.y;
+            screenShake = 20;
+            flash.style.opacity = '0.8';
+            setTimeout(()=>flash.style.opacity='0', 50);
+        });
 
         window.addEventListener('keydown', e => keys[e.code] = true);
         window.addEventListener('keyup', e => keys[e.code] = false);
@@ -66,91 +76,79 @@
         window.addEventListener('mousedown', () => keys['MouseDown'] = true);
         window.addEventListener('mouseup', () => keys['MouseDown'] = false);
 
-        function drawHeart(x, y, size, filled, color) {
-            ctx.save();
-            ctx.translate(x, y);
+        function drawHeart(x, y, filled, color) {
+            ctx.fillStyle = filled ? color : '#333';
+            ctx.shadowBlur = filled ? 10 : 0;
+            ctx.shadowColor = color;
             ctx.beginPath();
-            ctx.moveTo(0, size / 4);
-            ctx.quadraticCurveTo(0, 0, size / 4, 0);
-            ctx.quadraticCurveTo(size / 2, 0, size / 2, size / 4);
-            ctx.quadraticCurveTo(size / 2, 0, (size * 3) / 4, 0);
-            ctx.quadraticCurveTo(size, 0, size, size / 4);
-            ctx.quadraticCurveTo(size, size / 2, (size * 3) / 4, (size * 3) / 4);
-            ctx.lineTo(size / 2, size); ctx.lineTo(size / 4, (size * 3) / 4);
-            ctx.quadraticCurveTo(0, size / 2, 0, size / 4);
-            if (filled) {
-                ctx.fillStyle = color; ctx.shadowBlur = 10; ctx.shadowColor = color; ctx.fill();
-            } else {
-                ctx.strokeStyle = 'rgba(255,255,255,0.2)'; ctx.lineWidth = 1; ctx.stroke();
-            }
-            ctx.restore();
+            ctx.arc(x, y, 4, 0, Math.PI*2);
+            ctx.fill();
         }
 
         function update() {
             let dx = 0, dy = 0;
-            if(keys['KeyW']) dy = -6;
-            if(keys['KeyS']) dy = 6;
-            if(keys['KeyA']) dx = -6;
-            if(keys['KeyD']) dx = 6;
+            if(keys['KeyW']) dy = -7; if(keys['KeyS']) dy = 7;
+            if(keys['KeyA']) dx = -7; if(keys['KeyD']) dx = 7;
 
-            const centerX = myPos.x + 15;
-            const centerY = myPos.y + 15;
-            const angle = Math.atan2(mousePos.y - centerY, mousePos.x - centerX);
+            const angle = Math.atan2(mousePos.y - (myPos.y + 15), mousePos.x - (myPos.x + 15));
             const myDir = { x: Math.cos(angle), y: Math.sin(angle) };
 
             if(shootCooldown > 0) shootCooldown--;
             if((keys['Space'] || keys['MouseDown']) && shootCooldown === 0) {
                 socket.emit('shoot', { dir: myDir });
-                shootCooldown = 5; 
+                shootCooldown = 6;
             }
 
             myPos.x = Math.max(0, Math.min(canvas.width - 30, myPos.x + dx));
             myPos.y = Math.max(0, Math.min(canvas.height - 30, myPos.y + dy));
-
             socket.emit('move', { x: myPos.x, y: myPos.y, dir: myDir });
+            
+            if(screenShake > 0) screenShake *= 0.9; 
         }
 
         function draw() {
             update();
-            frameCount++;
-            ctx.fillStyle = 'rgba(5, 5, 5, 0.4)';
+            ctx.fillStyle = '#020205';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
-            
+
+            ctx.save();
+            // Apply Screen Shake
+            if(screenShake > 1) ctx.translate((Math.random()-0.5)*screenShake, (Math.random()-0.5)*screenShake);
+
+            // Draw Particles
+            particles.forEach((p, i) => {
+                p.update(); p.draw();
+                if(p.alpha <= 0) particles.splice(i, 1);
+            });
+
             for(let id in players) {
                 const p = players[id];
-                if (p.isInvincible && Math.floor(frameCount / 5) % 2 === 0) continue;
+                if(p.isInvincible && Math.floor(Date.now()/100)%2==0) continue;
 
-                // Hearts (Health)
-                const hp = p.hp || 100;
-                const activeHearts = Math.ceil((hp / 100) * 3);
-                for(let i = 0; i < 3; i++) {
-                    drawHeart(p.x + (i * 12) - 3, p.y - 25, 10, i < activeHearts, p.color);
-                }
+                // HP Hearts
+                const active = Math.ceil((p.hp/100)*3);
+                for(let i=0; i<3; i++) drawHeart(p.x + (i*12), p.y - 15, i < active, p.color);
 
-                // Player Square
-                ctx.shadowBlur = 15; ctx.shadowColor = p.color;
+                // Player
+                ctx.shadowBlur = 20; ctx.shadowColor = p.color;
                 ctx.fillStyle = p.color;
                 ctx.fillRect(p.x, p.y, 30, 30);
-                ctx.shadowBlur = 0;
 
-                // Orbiting Pointer Arrow
-                const angle = Math.atan2(p.dir.y, p.dir.x);
+                // Aim Arrow
                 ctx.save();
-                ctx.translate(p.x + 15, p.y + 15);
-                ctx.rotate(angle);
+                ctx.translate(p.x+15, p.y+15);
+                ctx.rotate(Math.atan2(p.dir.y, p.dir.x));
                 ctx.fillStyle = 'white';
-                ctx.beginPath();
-                ctx.moveTo(35, 0); ctx.lineTo(25, -5); ctx.lineTo(25, 5);
-                ctx.closePath(); ctx.fill();
+                ctx.beginPath(); ctx.moveTo(30,0); ctx.lineTo(20,-5); ctx.lineTo(20,5); ctx.fill();
                 ctx.restore();
 
                 // Bullets
                 p.bullets.forEach(b => {
-                    ctx.fillStyle = 'white'; ctx.shadowBlur = 10; ctx.shadowColor = 'white';
-                    ctx.beginPath(); ctx.arc(b.x, b.y, 8, 0, Math.PI*2); ctx.fill();
-                    ctx.shadowBlur = 0;
+                    ctx.fillStyle = 'white'; ctx.shadowBlur = 15; ctx.shadowColor = 'white';
+                    ctx.beginPath(); ctx.arc(b.x, b.y, 6, 0, Math.PI*2); ctx.fill();
                 });
             }
+            ctx.restore();
             requestAnimationFrame(draw);
         }
         draw();
