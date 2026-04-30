@@ -98,14 +98,13 @@
         }
 
         function update() {
-            let moved = false;
             let dx = 0, dy = 0;
 
             // Handle Movement (WASD)
-            if(keys['KeyW']) { dy = -6; moved = true; }
-            if(keys['KeyS']) { dy = 6; moved = true; }
-            if(keys['KeyA']) { dx = -6; moved = true; }
-            if(keys['KeyD']) { dx = 6; moved = true; }
+            if(keys['KeyW']) { dy = -6; }
+            if(keys['KeyS']) { dy = 6; }
+            if(keys['KeyA']) { dx = -6; }
+            if(keys['KeyD']) { dx = 6; }
 
             // Aiming logic: Calculate vector from player center to mouse
             const centerX = myPos.x + 15;
@@ -117,15 +116,16 @@
             if(shootCooldown > 0) shootCooldown--;
             if((keys['Space'] || keys['MouseDown']) && shootCooldown === 0) {
                 socket.emit('shoot', { dir: myDir });
-                shootCooldown = 5; // Fast firing speed
+                shootCooldown = 5; 
             }
 
-            // Boundary collision and position syncing
-            if(moved || shootCooldown > 0) { 
-                myPos.x = Math.max(0, Math.min(canvas.width - 30, myPos.x + dx));
-                myPos.y = Math.max(0, Math.min(canvas.height - 30, myPos.y + dy));
-                socket.emit('move', { x: myPos.x, y: myPos.y, dir: myDir });
-            }
+            // Update Position with BORDER LOCK
+            myPos.x = Math.max(0, Math.min(canvas.width - 30, myPos.x + dx));
+            myPos.y = Math.max(0, Math.min(canvas.height - 30, myPos.y + dy));
+
+            // ALWAYS emit move so the server knows the latest direction (dir) 
+            // even if the square isn't actually moving (dx/dy are 0)
+            socket.emit('move', { x: myPos.x, y: myPos.y, dir: myDir });
         }
 
         function draw() {
@@ -141,8 +141,8 @@
                 // Draw Health Hearts above player
                 const heartSize = 10;
                 const totalHearts = 3;
-                // We map 0-100 HP to 0-3 hearts
-                const currentHP = p.hp !== undefined ? p.hp : 100;
+                // Important: Ensure we default to 100 if HP isn't sent yet
+                const currentHP = (p.hp !== undefined) ? p.hp : 100;
                 const activeHearts = Math.ceil((currentHP / 100) * totalHearts);
                 
                 for(let i = 0; i < totalHearts; i++) {
@@ -162,7 +162,8 @@
                 ctx.fillRect(p.x, p.y, 30, 30);
                 ctx.shadowBlur = 0;
 
-                // Draw Orbiting Pointer Arrow (Points to cursor)
+                // Draw Orbiting Pointer Arrow
+                // Note: The arrow now uses p.dir which is constantly synced
                 const angle = Math.atan2(p.dir.y, p.dir.x);
                 ctx.save();
                 ctx.translate(pCenterX, pCenterY);
@@ -172,14 +173,14 @@
                 ctx.shadowColor = 'white';
                 
                 ctx.beginPath();
-                ctx.moveTo(35, 0);   // Tip
-                ctx.lineTo(25, -5);  // Top back
-                ctx.lineTo(25, 5);   // Bottom back
+                ctx.moveTo(35, 0);   
+                ctx.lineTo(25, -5);  
+                ctx.lineTo(25, 5);   
                 ctx.closePath();
                 ctx.fill();
                 ctx.restore();
 
-                // Draw Bullets with glow and large hit-visuals
+                // Draw Bullets
                 p.bullets.forEach(b => {
                     ctx.shadowBlur = 15;
                     ctx.shadowColor = 'white';
