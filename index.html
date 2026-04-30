@@ -2,11 +2,12 @@
 <html>
 <head>
     <style>
-        body { margin: 0; overflow: hidden; background: #111; }
-        canvas { display: block; }
+        body { margin: 0; overflow: hidden; background: #050505; font-family: sans-serif; }
+        #ui { position: absolute; top: 10px; left: 10px; color: #00ff88; pointer-events: none; }
     </style>
 </head>
 <body>
+    <div id="ui">Players Online: <span id="count">0</span></div>
     <canvas id="g"></canvas>
     <script src="/socket.io/socket.io.js"></script>
     <script>
@@ -14,10 +15,11 @@
         const canvas = document.getElementById('g');
         const ctx = canvas.getContext('2d');
         
-        let myPos = { x: 100, y: 100 };
-        let allPlayers = {};
+        let myId = null;
+        let myPos = { x: Math.random() * 500, y: Math.random() * 500 };
+        let players = {};
+        const keys = {};
 
-        // Resize canvas to fill window
         function resize() {
             canvas.width = window.innerWidth;
             canvas.height = window.innerHeight;
@@ -25,11 +27,16 @@
         window.addEventListener('resize', resize);
         resize();
 
-        socket.on('updatePlayers', (data) => { allPlayers = data; });
+        socket.on('connect', () => { myId = socket.id; });
+        socket.on('updatePlayers', (data) => { 
+            players = data; 
+            document.getElementById('count').innerText = Object.keys(data).length;
+        });
 
-        // Handle movement
-        const keys = {};
-        window.addEventListener('keydown', e => keys[e.code] = true);
+        window.addEventListener('keydown', e => {
+            keys[e.code] = true;
+            if(e.code === 'Space') socket.emit('shoot');
+        });
         window.addEventListener('keyup', e => keys[e.code] = false);
 
         function update() {
@@ -44,15 +51,31 @@
 
         function draw() {
             update();
-            ctx.fillStyle = '#111';
+            ctx.fillStyle = 'rgba(5, 5, 5, 0.3)'; // Trail effect
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             
-            for(let id in allPlayers) {
-                const p = allPlayers[id];
+            for(let id in players) {
+                const p = players[id];
+                
+                // Draw Player
                 ctx.fillStyle = p.color;
                 ctx.shadowBlur = 15;
                 ctx.shadowColor = p.color;
                 ctx.fillRect(p.x, p.y, 30, 30);
+                
+                // Draw Health Bar
+                ctx.fillStyle = '#333';
+                ctx.fillRect(p.x, p.y - 10, 30, 4);
+                ctx.fillStyle = '#00ff88';
+                ctx.fillRect(p.x, p.y - 10, (p.hp / 100) * 30, 4);
+
+                // Draw Bullets
+                p.bullets.forEach(b => {
+                    ctx.fillStyle = 'white';
+                    ctx.beginPath();
+                    ctx.arc(b.x, b.y, 4, 0, Math.PI*2);
+                    ctx.fill();
+                });
             }
             requestAnimationFrame(draw);
         }
