@@ -69,6 +69,7 @@
         window.addEventListener('mousedown', () => keys['MouseDown'] = true);
         window.addEventListener('mouseup', () => keys['MouseDown'] = false);
 
+        // Helper function to draw pixel-art style neon hearts
         function drawHeart(x, y, size, filled, color) {
             ctx.save();
             ctx.translate(x, y);
@@ -100,25 +101,27 @@
             let moved = false;
             let dx = 0, dy = 0;
 
+            // Handle Movement (WASD)
             if(keys['KeyW']) { dy = -6; moved = true; }
             if(keys['KeyS']) { dy = 6; moved = true; }
             if(keys['KeyA']) { dx = -6; moved = true; }
             if(keys['KeyD']) { dx = 6; moved = true; }
 
-            // Aiming logic
+            // Aiming logic: Calculate vector from player center to mouse
             const centerX = myPos.x + 15;
             const centerY = myPos.y + 15;
             const angle = Math.atan2(mousePos.y - centerY, mousePos.x - centerX);
             const myDir = { x: Math.cos(angle), y: Math.sin(angle) };
 
-            // Rapid fire
+            // Rapid fire cooldown logic
             if(shootCooldown > 0) shootCooldown--;
             if((keys['Space'] || keys['MouseDown']) && shootCooldown === 0) {
                 socket.emit('shoot', { dir: myDir });
-                shootCooldown = 5; 
+                shootCooldown = 5; // Fast firing speed
             }
 
-            if(moved || shootCooldown > 0) { // Keep syncing even if just turning
+            // Boundary collision and position syncing
+            if(moved || shootCooldown > 0) { 
                 myPos.x = Math.max(0, Math.min(canvas.width - 30, myPos.x + dx));
                 myPos.y = Math.max(0, Math.min(canvas.height - 30, myPos.y + dy));
                 socket.emit('move', { x: myPos.x, y: myPos.y, dir: myDir });
@@ -127,7 +130,7 @@
 
         function draw() {
             update();
-            ctx.fillStyle = 'rgba(5, 5, 5, 0.4)';
+            ctx.fillStyle = 'rgba(5, 5, 5, 0.4)'; // Motion blur trail
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             
             for(let id in players) {
@@ -135,10 +138,11 @@
                 const pCenterX = p.x + 15;
                 const pCenterY = p.y + 15;
                 
-                // Draw Hearts (Health)
+                // Draw Health Hearts above player
                 const heartSize = 10;
                 const totalHearts = 3;
-                const currentHP = p.hp || 100; // Assuming 100 max, 33 per heart
+                // We map 0-100 HP to 0-3 hearts
+                const currentHP = p.hp !== undefined ? p.hp : 100;
                 const activeHearts = Math.ceil((currentHP / 100) * totalHearts);
                 
                 for(let i = 0; i < totalHearts; i++) {
@@ -151,14 +155,14 @@
                     );
                 }
 
-                // Player Square
+                // Draw Player Square
                 ctx.shadowBlur = 15;
                 ctx.shadowColor = p.color;
                 ctx.fillStyle = p.color;
                 ctx.fillRect(p.x, p.y, 30, 30);
                 ctx.shadowBlur = 0;
 
-                // Orbiting Pointer Arrow
+                // Draw Orbiting Pointer Arrow (Points to cursor)
                 const angle = Math.atan2(p.dir.y, p.dir.x);
                 ctx.save();
                 ctx.translate(pCenterX, pCenterY);
@@ -166,16 +170,16 @@
                 ctx.fillStyle = 'white';
                 ctx.shadowBlur = 10;
                 ctx.shadowColor = 'white';
-                // Draw Arrow shape
+                
                 ctx.beginPath();
-                ctx.moveTo(35, 0);
-                ctx.lineTo(25, -5);
-                ctx.lineTo(25, 5);
+                ctx.moveTo(35, 0);   // Tip
+                ctx.lineTo(25, -5);  // Top back
+                ctx.lineTo(25, 5);   // Bottom back
                 ctx.closePath();
                 ctx.fill();
                 ctx.restore();
 
-                // Bullets
+                // Draw Bullets with glow and large hit-visuals
                 p.bullets.forEach(b => {
                     ctx.shadowBlur = 15;
                     ctx.shadowColor = 'white';
