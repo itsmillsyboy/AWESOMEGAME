@@ -32,7 +32,7 @@ io.on('connection', (socket) => {
 
     socket.on('shoot', () => {
         const p = players[socket.id];
-        if(p && p.bullets.length < 3) { // Max 3 bullets on screen per player
+        if(p && p.bullets.length < 10) { // Max 3 bullets on screen per player
             p.bullets.push({ 
                 x: p.x + 15, y: p.y + 15, 
                 vx: p.dir.x * 12, 
