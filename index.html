@@ -13,7 +13,7 @@
     <div id="flash" class="death-flash"></div>
     <div id="ui">
         ONLINE: <span id="count">0</span><br>
-        MOVE: WASD | SHOOT: SPACE
+        MOVE: WASD | SHOOT: SPACE (HOLD FOR RAPID FIRE)
     </div>
     <div id="leaderboard">
         LEADERBOARD<br><div id="list"></div>
@@ -31,6 +31,7 @@
         let myDir = { x: 1, y: 0 };
         let players = {};
         const keys = {};
+        let shootCooldown = 0;
 
         function resize() {
             canvas.width = window.innerWidth;
@@ -61,7 +62,6 @@
 
         window.addEventListener('keydown', e => {
             keys[e.code] = true;
-            if(e.code === 'Space') socket.emit('shoot');
         });
         window.addEventListener('keyup', e => keys[e.code] = false);
 
@@ -73,6 +73,13 @@
             if(keys['KeyS']) { dy = 6; moved = true; }
             if(keys['KeyA']) { dx = -6; moved = true; }
             if(keys['KeyD']) { dx = 6; moved = true; }
+
+            // Infinite Shooting Logic
+            if(shootCooldown > 0) shootCooldown--;
+            if(keys['Space'] && shootCooldown === 0) {
+                socket.emit('shoot');
+                shootCooldown = 5; // Adjust this number for firing speed (lower = faster)
+            }
 
             if(moved) {
                 // Update Position with BORDER LOCK
@@ -104,13 +111,14 @@
                 ctx.fillStyle = 'white';
                 ctx.fillRect(p.x + 12 + (p.dir.x * 10), p.y + 12 + (p.dir.y * 10), 6, 6);
 
-                // Bullets
+                // Bullets (Drawn with larger radius for the visual hitbox)
                 p.bullets.forEach(b => {
-                    ctx.shadowBlur = 10;
+                    ctx.shadowBlur = 15;
                     ctx.shadowColor = 'white';
                     ctx.fillStyle = 'white';
                     ctx.beginPath();
-                    ctx.arc(b.x, b.y, 4, 0, Math.PI*2);
+                    // Visual radius increased to 8 to match the larger gameplay hitbox
+                    ctx.arc(b.x, b.y, 8, 0, Math.PI*2);
                     ctx.fill();
                 });
             }
