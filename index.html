@@ -1,127 +1,159 @@
-const express = require('express');
-const http = require('http');
-const { Server } = require('socket.io');
+<!DOCTYPE html>
+<html>
+<head>
+    <title>NEON ARENA: THEME MASTER</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, sans-serif; transition: background 0.5s; background: #000; }
+        #ui { position: absolute; top: 20px; left: 20px; color: white; pointer-events: none; z-index: 10; text-shadow: 2px 2px 4px rgba(0,0,0,0.5); }
+        #controls { font-size: 0.8em; opacity: 0.8; margin-top: 10px; }
+        #super-ready { color: #ff0; font-weight: bold; font-size: 1.2em; display: none; animation: flash 0.5s infinite; }
+        @keyframes flash { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }
+        #leaderboard { position: absolute; top: 20px; right: 20px; color: white; text-align: right; background: rgba(0,0,0,0.4); padding: 15px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.2); }
+        .death-flash { position: absolute; inset: 0; background: white; opacity: 0; pointer-events: none; z-index: 100; }
+    </style>
+</head>
+<body>
+    <div id="flash" class="death-flash"></div>
+    <div id="ui">
+        <strong>KILLS: <span id="kills">0</span></strong> | SUPER: <span id="s-bar">0/5</span>
+        <div id="super-ready">SUPER READY (SPACE)</div>
+        <div id="controls">
+            WASD: Move | MOUSE: Aim/Shoot<br>
+            <b>SPACE: Shotgun Super</b> | <b>T: Cycle Theme</b>
+        </div>
+    </div>
+    <div id="leaderboard"><strong>LEADERBOARD</strong><div id="list"></div></div>
+    <canvas id="g"></canvas>
 
-const app = express();
-const server = http.createServer(app);
-const io = new Server(server);
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        const canvas = document.getElementById('g');
+        const ctx = canvas.getContext('2d');
+        const flash = document.getElementById('flash');
+        
+        let myPos = { x: 400, y: 300 };
+        let mousePos = { x: 0, y: 0 };
+        let players = {}, pickups = [], keys = {}, shootCooldown = 0;
 
-app.use(express.static(__dirname));
+        // Themes
+        const themes = [
+            { name: 'DARK', bg: '#050508', text: '#fff', accent: '#0ff' },
+            { name: 'LIGHT', bg: '#e0e0e0', text: '#222', accent: '#555' },
+            { name: 'CYBERPUNK', bg: '#120458', text: '#ff00ff', accent: '#39ff14' },
+            { name: 'MAGMA', bg: '#2e0800', text: '#ffcc00', accent: '#ff4500' }
+        ];
+        let themeIndex = 0;
 
-let players = {};
-let pickups = [];
+        function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
+        window.addEventListener('resize', resize);
+        resize();
 
-// Spawn a random pickup every 8 seconds
-setInterval(() => {
-    if (pickups.length < 6) {
-        pickups.push({
-            id: Math.random(),
-            x: Math.random() * 800 + 50,
-            y: Math.random() * 500 + 50,
-            type: Math.random() > 0.5 ? 'SHIELD' : 'SPEED'
+        socket.on('updatePlayers', data => { 
+            players = data;
+            const me = players[socket.id];
+            if(me) {
+                document.getElementById('kills').innerText = me.kills;
+                document.getElementById('s-bar').innerText = me.superCharge + "/5";
+                document.getElementById('super-ready').style.display = me.superCharge >= 5 ? 'block' : 'none';
+            }
+            const sorted = Object.values(players).sort((a,b)=>b.kills-a.kills).slice(0,5);
+            document.getElementById('list').innerHTML = sorted.map(p=>`<br>${p.name}: ${p.kills}`).join('');
         });
-        io.emit('updatePickups', pickups);
-    }
-}, 8000);
 
-io.on('connection', (socket) => {
-    players[socket.id] = { 
-        x: 400, y: 300, hp: 100, kills: 0, 
-        color: `hsl(${Math.random() * 360}, 80%, 60%)`,
-        dir: { x: 1, y: 0 }, bullets: [], 
-        isInvincible: false, isShielded: false, speedMult: 1,
-        superCharge: 0 
-    };
+        socket.on('updatePickups', data => { pickups = data; });
+        socket.on('respawn', data => { 
+            myPos.x = data.x; myPos.y = data.y; 
+            flash.style.opacity = '0.5'; setTimeout(()=>flash.style.opacity='0', 100);
+        });
 
-    io.emit('updatePlayers', players);
-    io.emit('updatePickups', pickups);
+        window.addEventListener('keydown', e => {
+            keys[e.code] = true;
+            if(e.code === 'Space') socket.emit('activateSuper');
+            if(e.code === 'KeyT') {
+                themeIndex = (themeIndex + 1) % themes.length;
+                document.body.style.background = themes[themeIndex].bg;
+                document.getElementById('ui').style.color = themes[themeIndex].text;
+                document.getElementById('leaderboard').style.color = themes[themeIndex].text;
+            }
+        });
+        window.addEventListener('keyup', e => keys[e.code] = false);
+        window.addEventListener('mousemove', e => { mousePos.x = e.clientX; mousePos.y = e.clientY; });
+        window.addEventListener('mousedown', () => keys['MouseDown'] = true);
+        window.addEventListener('mouseup', () => keys['MouseDown'] = false);
 
-    socket.on('move', (data) => {
-        if (players[socket.id]) {
-            players[socket.id].x = data.x;
-            players[socket.id].y = data.y;
-            players[socket.id].dir = data.dir;
+        function update() {
+            const me = players[socket.id];
+            let speed = 6.5 * (me ? me.speedMult : 1);
+            let dx = 0, dy = 0;
+            if(keys['KeyW']) dy = -speed; if(keys['KeyS']) dy = speed;
+            if(keys['KeyA']) dx = -speed; if(keys['KeyD']) dx = speed;
 
-            // Pickup detection
-            pickups = pickups.filter(p => {
-                let dist = Math.hypot(players[socket.id].x + 15 - p.x, players[socket.id].y + 15 - p.y);
-                if (dist < 30) {
-                    applyPowerup(socket.id, p.type);
-                    io.emit('updatePickups', pickups);
-                    return false;
-                }
-                return true;
-            });
+            const angle = Math.atan2(mousePos.y - (myPos.y + 15), mousePos.x - (myPos.x + 15));
+            const myDir = { x: Math.cos(angle), y: Math.sin(angle) };
+
+            if(shootCooldown > 0) shootCooldown--;
+            if(keys['MouseDown'] && shootCooldown === 0) {
+                socket.emit('shoot', { dir: myDir });
+                shootCooldown = 7;
+            }
+
+            myPos.x = Math.max(0, Math.min(canvas.width - 30, myPos.x + dx));
+            myPos.y = Math.max(0, Math.min(canvas.height - 30, myPos.y + dy));
+            socket.emit('move', { x: myPos.x, y: myPos.y, dir: myDir });
         }
-    });
 
-    socket.on('shoot', (data) => {
-        const p = players[socket.id];
-        if (p) p.bullets.push({ x: p.x + 15, y: p.y + 15, vx: data.dir.x * 15, vy: data.dir.y * 15, life: 80 });
-    });
+        function draw() {
+            update();
+            const t = themes[themeIndex];
+            ctx.fillStyle = t.bg;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    socket.on('activateSuper', () => {
-        const p = players[socket.id];
-        if (p && p.superCharge >= 5) {
-            p.superCharge = 0;
-            const baseAngle = Math.atan2(p.dir.y, p.dir.x);
-            for (let i = -2; i <= 2; i++) {
-                const angle = baseAngle + (i * 0.25);
-                p.bullets.push({ 
-                    x: p.x + 15, y: p.y + 15, 
-                    vx: Math.cos(angle) * 18, vy: Math.sin(angle) * 18, 
-                    life: 45, isSuper: true 
+            // Draw Pickups (Shields are Blue, Speed is Gold)
+            pickups.forEach(p => {
+                ctx.shadowBlur = 15;
+                ctx.shadowColor = p.type === 'SHIELD' ? '#0af' : '#fb0';
+                ctx.fillStyle = p.type === 'SHIELD' ? '#0af' : '#fb0';
+                ctx.beginPath(); ctx.arc(p.x, p.y, 12, 0, Math.PI*2); ctx.fill();
+            });
+
+            for(let id in players) {
+                const p = players[id];
+                if(p.isInvincible && Math.floor(Date.now()/80)%2==0) continue;
+
+                // Shield visual
+                if(p.isShielded) {
+                    ctx.strokeStyle = '#0af'; ctx.lineWidth = 4; ctx.shadowBlur = 10;
+                    ctx.beginPath(); ctx.arc(p.x+15, p.y+15, 38, 0, Math.PI*2); ctx.stroke();
+                }
+
+                // Player Square
+                ctx.shadowBlur = 20; ctx.shadowColor = p.color;
+                ctx.fillStyle = p.color;
+                ctx.fillRect(p.x, p.y, 30, 30);
+
+                // Hearts
+                for(let i=0; i<Math.ceil((p.hp/100)*3); i++) {
+                    ctx.fillStyle = '#ff3333';
+                    ctx.fillRect(p.x + (i*11), p.y - 15, 8, 8);
+                }
+
+                // Pointer Arrow
+                ctx.save();
+                ctx.translate(p.x+15, p.y+15); ctx.rotate(Math.atan2(p.dir.y, p.dir.x));
+                ctx.fillStyle = t.text; ctx.beginPath(); ctx.moveTo(40,0); ctx.lineTo(28,-7); ctx.lineTo(28,7); ctx.fill();
+                ctx.restore();
+
+                // Bullets
+                p.bullets.forEach(b => {
+                    ctx.fillStyle = b.isSuper ? '#fff' : t.accent;
+                    ctx.shadowBlur = 15; ctx.shadowColor = b.isSuper ? '#ff0' : t.accent;
+                    ctx.beginPath(); ctx.arc(b.x, b.y, b.isSuper ? 12 : 7, 0, Math.PI*2); ctx.fill();
                 });
             }
+            requestAnimationFrame(draw);
         }
-    });
-
-    socket.on('disconnect', () => { delete players[socket.id]; io.emit('updatePlayers', players); });
-});
-
-function applyPowerup(id, type) {
-    const p = players[id];
-    if (!p) return;
-    if (type === 'SHIELD') {
-        p.isShielded = true;
-        setTimeout(() => { if(players[id]) p.isShielded = false; }, 5000);
-    } else if (type === 'SPEED') {
-        p.speedMult = 1.8;
-        setTimeout(() => { if(players[id]) p.speedMult = 1; }, 5000);
-    }
-}
-
-setInterval(() => {
-    for (let id in players) {
-        let p = players[id];
-        for (let bIndex = p.bullets.length - 1; bIndex >= 0; bIndex--) {
-            let b = p.bullets[bIndex];
-            b.x += b.vx; b.y += b.vy; b.life--;
-
-            for (let targetId in players) {
-                if (targetId !== id) {
-                    let t = players[targetId];
-                    let dist = Math.hypot(b.x - (t.x + 15), b.y - (t.y + 15));
-                    if (dist < 28 && !t.isInvincible && !t.isShielded) { 
-                        t.hp -= 34;
-                        p.bullets.splice(bIndex, 1);
-                        if (t.hp <= 0) {
-                            p.kills++; p.superCharge++;
-                            t.hp = 100; t.x = Math.random() * 800; t.y = Math.random() * 600;
-                            t.isInvincible = true;
-                            io.to(targetId).emit('respawn', { x: t.x, y: t.y });
-                            setTimeout(() => { if(players[targetId]) players[targetId].isInvincible = false; }, 1000);
-                        }
-                        break; 
-                    } else if (dist < 35 && t.isShielded) {
-                        p.bullets.splice(bIndex, 1);
-                    }
-                }
-            }
-            if (b && b.life <= 0) p.bullets.splice(bIndex, 1);
-        }
-    }
-    io.emit('updatePlayers', players);
-}, 1000 / 60);
-
-server.listen(process.env.PORT || 3000);
+        draw();
+    </script>
+</body>
+</html>
