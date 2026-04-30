@@ -1,19 +1,19 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Neon Arena</title>
+    <title>Neon Arena Online</title>
     <style>
         body { margin: 0; overflow: hidden; background: #050505; font-family: 'Courier New', Courier, monospace; }
-        #ui { position: absolute; top: 20px; left: 20px; color: #00ff88; pointer-events: none; text-shadow: 0 0 10px #00ff88; }
-        #leaderboard { position: absolute; top: 20px; right: 20px; color: #ff00ff; text-align: right; text-shadow: 0 0 10px #ff00ff; }
-        .death-flash { position: absolute; inset: 0; background: red; opacity: 0; pointer-events: none; transition: opacity 0.3s; }
+        #ui { position: absolute; top: 20px; left: 20px; color: #00ff88; pointer-events: none; text-shadow: 0 0 10px #00ff88; z-index: 10; }
+        #leaderboard { position: absolute; top: 20px; right: 20px; color: #ff00ff; text-align: right; text-shadow: 0 0 10px #ff00ff; z-index: 10; }
+        .death-flash { position: absolute; inset: 0; background: red; opacity: 0; pointer-events: none; transition: opacity 0.3s; z-index: 5; }
     </style>
 </head>
 <body>
     <div id="flash" class="death-flash"></div>
     <div id="ui">
         ONLINE: <span id="count">0</span><br>
-        MOVE: WASD | SHOOT: SPACE or CLICK
+        WASD to Move | CLICK/SPACE to Shoot
     </div>
     <div id="leaderboard">
         LEADERBOARD<br><div id="list"></div>
@@ -32,6 +32,7 @@
         let players = {};
         const keys = {};
         let shootCooldown = 0;
+        let frameCount = 0;
 
         function resize() {
             canvas.width = window.innerWidth;
@@ -46,30 +47,25 @@
             updateLeaderboard();
         });
 
-        socket.on('death', () => {
+        // SYNC FIX: Update local position when server respawns you
+        socket.on('respawn', (newPos) => {
+            myPos.x = newPos.x;
+            myPos.y = newPos.y;
             flash.style.opacity = '0.5';
             setTimeout(() => flash.style.opacity = '0', 100);
         });
 
         function updateLeaderboard() {
-            const list = Object.values(players)
-                .sort((a, b) => b.kills - a.kills)
-                .slice(0, 5)
-                .map(p => `${p.name}: ${p.kills}`)
-                .join('<br>');
-            document.getElementById('list').innerHTML = list;
+            const sorted = Object.values(players).sort((a, b) => b.kills - a.kills).slice(0, 5);
+            document.getElementById('list').innerHTML = sorted.map(p => `${p.name}: ${p.kills}`).join('<br>');
         }
 
         window.addEventListener('keydown', e => keys[e.code] = true);
         window.addEventListener('keyup', e => keys[e.code] = false);
-        window.addEventListener('mousemove', e => {
-            mousePos.x = e.clientX;
-            mousePos.y = e.clientY;
-        });
+        window.addEventListener('mousemove', e => { mousePos.x = e.clientX; mousePos.y = e.clientY; });
         window.addEventListener('mousedown', () => keys['MouseDown'] = true);
         window.addEventListener('mouseup', () => keys['MouseDown'] = false);
 
-        // Helper function to draw pixel-art style neon hearts
         function drawHeart(x, y, size, filled, color) {
             ctx.save();
             ctx.translate(x, y);
@@ -80,114 +76,79 @@
             ctx.quadraticCurveTo(size / 2, 0, (size * 3) / 4, 0);
             ctx.quadraticCurveTo(size, 0, size, size / 4);
             ctx.quadraticCurveTo(size, size / 2, (size * 3) / 4, (size * 3) / 4);
-            ctx.lineTo(size / 2, size);
-            ctx.lineTo(size / 4, (size * 3) / 4);
+            ctx.lineTo(size / 2, size); ctx.lineTo(size / 4, (size * 3) / 4);
             ctx.quadraticCurveTo(0, size / 2, 0, size / 4);
-            
             if (filled) {
-                ctx.fillStyle = color;
-                ctx.shadowBlur = 10;
-                ctx.shadowColor = color;
-                ctx.fill();
+                ctx.fillStyle = color; ctx.shadowBlur = 10; ctx.shadowColor = color; ctx.fill();
             } else {
-                ctx.strokeStyle = 'rgba(255,255,255,0.2)';
-                ctx.lineWidth = 1;
-                ctx.stroke();
+                ctx.strokeStyle = 'rgba(255,255,255,0.2)'; ctx.lineWidth = 1; ctx.stroke();
             }
             ctx.restore();
         }
 
         function update() {
             let dx = 0, dy = 0;
+            if(keys['KeyW']) dy = -6;
+            if(keys['KeyS']) dy = 6;
+            if(keys['KeyA']) dx = -6;
+            if(keys['KeyD']) dx = 6;
 
-            // Handle Movement (WASD)
-            if(keys['KeyW']) { dy = -6; }
-            if(keys['KeyS']) { dy = 6; }
-            if(keys['KeyA']) { dx = -6; }
-            if(keys['KeyD']) { dx = 6; }
-
-            // Aiming logic: Calculate vector from player center to mouse
             const centerX = myPos.x + 15;
             const centerY = myPos.y + 15;
             const angle = Math.atan2(mousePos.y - centerY, mousePos.x - centerX);
             const myDir = { x: Math.cos(angle), y: Math.sin(angle) };
 
-            // Rapid fire cooldown logic
             if(shootCooldown > 0) shootCooldown--;
             if((keys['Space'] || keys['MouseDown']) && shootCooldown === 0) {
                 socket.emit('shoot', { dir: myDir });
                 shootCooldown = 5; 
             }
 
-            // Update Position with BORDER LOCK
             myPos.x = Math.max(0, Math.min(canvas.width - 30, myPos.x + dx));
             myPos.y = Math.max(0, Math.min(canvas.height - 30, myPos.y + dy));
 
-            // ALWAYS emit move so the server knows the latest direction (dir) 
-            // even if the square isn't actually moving (dx/dy are 0)
             socket.emit('move', { x: myPos.x, y: myPos.y, dir: myDir });
         }
 
         function draw() {
             update();
-            ctx.fillStyle = 'rgba(5, 5, 5, 0.4)'; // Motion blur trail
+            frameCount++;
+            ctx.fillStyle = 'rgba(5, 5, 5, 0.4)';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             
             for(let id in players) {
                 const p = players[id];
-                const pCenterX = p.x + 15;
-                const pCenterY = p.y + 15;
-                
-                // Draw Health Hearts above player
-                const heartSize = 10;
-                const totalHearts = 3;
-                // Important: Ensure we default to 100 if HP isn't sent yet
-                const currentHP = (p.hp !== undefined) ? p.hp : 100;
-                const activeHearts = Math.ceil((currentHP / 100) * totalHearts);
-                
-                for(let i = 0; i < totalHearts; i++) {
-                    drawHeart(
-                        p.x + (i * 12) - 3, 
-                        p.y - 25, 
-                        heartSize, 
-                        i < activeHearts, 
-                        p.color
-                    );
+                if (p.isInvincible && Math.floor(frameCount / 5) % 2 === 0) continue;
+
+                // Hearts (Health)
+                const hp = p.hp || 100;
+                const activeHearts = Math.ceil((hp / 100) * 3);
+                for(let i = 0; i < 3; i++) {
+                    drawHeart(p.x + (i * 12) - 3, p.y - 25, 10, i < activeHearts, p.color);
                 }
 
-                // Draw Player Square
-                ctx.shadowBlur = 15;
-                ctx.shadowColor = p.color;
+                // Player Square
+                ctx.shadowBlur = 15; ctx.shadowColor = p.color;
                 ctx.fillStyle = p.color;
                 ctx.fillRect(p.x, p.y, 30, 30);
                 ctx.shadowBlur = 0;
 
-                // Draw Orbiting Pointer Arrow
-                // Note: The arrow now uses p.dir which is constantly synced
+                // Orbiting Pointer Arrow
                 const angle = Math.atan2(p.dir.y, p.dir.x);
                 ctx.save();
-                ctx.translate(pCenterX, pCenterY);
+                ctx.translate(p.x + 15, p.y + 15);
                 ctx.rotate(angle);
                 ctx.fillStyle = 'white';
-                ctx.shadowBlur = 10;
-                ctx.shadowColor = 'white';
-                
                 ctx.beginPath();
-                ctx.moveTo(35, 0);   
-                ctx.lineTo(25, -5);  
-                ctx.lineTo(25, 5);   
-                ctx.closePath();
-                ctx.fill();
+                ctx.moveTo(35, 0); ctx.lineTo(25, -5); ctx.lineTo(25, 5);
+                ctx.closePath(); ctx.fill();
                 ctx.restore();
 
-                // Draw Bullets
+                // Bullets
                 p.bullets.forEach(b => {
-                    ctx.shadowBlur = 15;
-                    ctx.shadowColor = 'white';
-                    ctx.fillStyle = 'white';
-                    ctx.beginPath();
-                    ctx.arc(b.x, b.y, 8, 0, Math.PI*2);
-                    ctx.fill();
+                    ctx.fillStyle = 'white'; ctx.shadowBlur = 10; ctx.shadowColor = 'white';
+                    ctx.beginPath(); ctx.arc(b.x, b.y, 8, 0, Math.PI*2); ctx.fill();
+                    ctx.shadowBlur = 0;
                 });
             }
             requestAnimationFrame(draw);
