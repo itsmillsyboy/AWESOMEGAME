@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { margin: 0; overflow: hidden; background: #111; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <canvas id="g"></canvas>
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        const canvas = document.getElementById('g');
+        const ctx = canvas.getContext('2d');
+        
+        let myPos = { x: 100, y: 100 };
+        let allPlayers = {};
+
+        // Resize canvas to fill window
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        socket.on('updatePlayers', (data) => { allPlayers = data; });
+
+        // Handle movement
+        const keys = {};
+        window.addEventListener('keydown', e => keys[e.code] = true);
+        window.addEventListener('keyup', e => keys[e.code] = false);
+
+        function update() {
+            let moved = false;
+            if(keys['ArrowUp'] || keys['KeyW']) { myPos.y -= 5; moved = true; }
+            if(keys['ArrowDown'] || keys['KeyS']) { myPos.y += 5; moved = true; }
+            if(keys['ArrowLeft'] || keys['KeyA']) { myPos.x -= 5; moved = true; }
+            if(keys['ArrowRight'] || keys['KeyD']) { myPos.x += 5; moved = true; }
+            
+            if(moved) socket.emit('move', myPos);
+        }
+
+        function draw() {
+            update();
+            ctx.fillStyle = '#111';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            for(let id in allPlayers) {
+                const p = allPlayers[id];
+                ctx.fillStyle = p.color;
+                ctx.shadowBlur = 15;
+                ctx.shadowColor = p.color;
+                ctx.fillRect(p.x, p.y, 30, 30);
+            }
+            requestAnimationFrame(draw);
+        }
+        draw();
+    </script>
+</body>
+</html>
