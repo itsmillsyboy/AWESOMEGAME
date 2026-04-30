@@ -1,157 +1,127 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>NEON DUEL PRO</title>
-    <style>
-        body { margin: 0; overflow: hidden; background: #020205; font-family: 'Segoe UI', sans-serif; }
-        #ui { position: absolute; top: 20px; left: 20px; color: #0ff; pointer-events: none; letter-spacing: 2px; }
-        #leaderboard { position: absolute; top: 20px; right: 20px; color: #f0f; text-align: right; background: rgba(255,0,255,0.1); padding: 10px; border-radius: 5px; border: 1px solid #f0f; }
-        .death-flash { position: absolute; inset: 0; background: white; opacity: 0; pointer-events: none; z-index: 100; }
-    </style>
-</head>
-<body>
-    <div id="flash" class="death-flash"></div>
-    <div id="ui">SYSTEM ONLINE // <span id="count">0</span> USERS</div>
-    <div id="leaderboard"><strong>TOP STRIKERS</strong><div id="list"></div></div>
-    <canvas id="g"></canvas>
+const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
 
-    <script src="/socket.io/socket.io.js"></script>
-    <script>
-        const socket = io();
-        const canvas = document.getElementById('g');
-        const ctx = canvas.getContext('2d');
-        const flash = document.getElementById('flash');
-        
-        let myPos = { x: 400, y: 300 };
-        let mousePos = { x: 0, y: 0 };
-        let players = {};
-        const keys = {};
-        let particles = [];
-        let screenShake = 0;
-        let shootCooldown = 0;
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server);
 
-        function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
-        window.addEventListener('resize', resize);
-        resize();
+app.use(express.static(__dirname));
 
-        // Particle Class for Polish
-        class Particle {
-            constructor(x, y, color) {
-                this.x = x; this.y = y;
-                this.vx = (Math.random() - 0.5) * 10;
-                this.vy = (Math.random() - 0.5) * 10;
-                this.alpha = 1;
-                this.color = color;
-            }
-            update() { this.x += this.vx; this.y += this.vy; this.alpha -= 0.02; }
-            draw() {
-                ctx.globalAlpha = this.alpha;
-                ctx.fillStyle = this.color;
-                ctx.fillRect(this.x, this.y, 3, 3);
-                ctx.globalAlpha = 1;
-            }
-        }
+let players = {};
+let pickups = [];
 
-        socket.on('updatePlayers', data => { 
-            players = data;
-            document.getElementById('count').innerText = Object.keys(data).length;
-            const sorted = Object.values(players).sort((a,b)=>b.kills-a.kills).slice(0,5);
-            document.getElementById('list').innerHTML = sorted.map(p=>`<br>${p.name}: ${p.kills}`).join('');
+// Spawn a random pickup every 8 seconds
+setInterval(() => {
+    if (pickups.length < 6) {
+        pickups.push({
+            id: Math.random(),
+            x: Math.random() * 800 + 50,
+            y: Math.random() * 500 + 50,
+            type: Math.random() > 0.5 ? 'SHIELD' : 'SPEED'
         });
+        io.emit('updatePickups', pickups);
+    }
+}, 8000);
 
-        socket.on('impact', data => {
-            for(let i=0; i<8; i++) particles.push(new Particle(data.x, data.y, data.color));
-        });
+io.on('connection', (socket) => {
+    players[socket.id] = { 
+        x: 400, y: 300, hp: 100, kills: 0, 
+        color: `hsl(${Math.random() * 360}, 80%, 60%)`,
+        dir: { x: 1, y: 0 }, bullets: [], 
+        isInvincible: false, isShielded: false, speedMult: 1,
+        superCharge: 0 
+    };
 
-        socket.on('respawn', data => {
-            myPos.x = data.x; myPos.y = data.y;
-            screenShake = 20;
-            flash.style.opacity = '0.8';
-            setTimeout(()=>flash.style.opacity='0', 50);
-        });
+    io.emit('updatePlayers', players);
+    io.emit('updatePickups', pickups);
 
-        window.addEventListener('keydown', e => keys[e.code] = true);
-        window.addEventListener('keyup', e => keys[e.code] = false);
-        window.addEventListener('mousemove', e => { mousePos.x = e.clientX; mousePos.y = e.clientY; });
-        window.addEventListener('mousedown', () => keys['MouseDown'] = true);
-        window.addEventListener('mouseup', () => keys['MouseDown'] = false);
+    socket.on('move', (data) => {
+        if (players[socket.id]) {
+            players[socket.id].x = data.x;
+            players[socket.id].y = data.y;
+            players[socket.id].dir = data.dir;
 
-        function drawHeart(x, y, filled, color) {
-            ctx.fillStyle = filled ? color : '#333';
-            ctx.shadowBlur = filled ? 10 : 0;
-            ctx.shadowColor = color;
-            ctx.beginPath();
-            ctx.arc(x, y, 4, 0, Math.PI*2);
-            ctx.fill();
-        }
-
-        function update() {
-            let dx = 0, dy = 0;
-            if(keys['KeyW']) dy = -7; if(keys['KeyS']) dy = 7;
-            if(keys['KeyA']) dx = -7; if(keys['KeyD']) dx = 7;
-
-            const angle = Math.atan2(mousePos.y - (myPos.y + 15), mousePos.x - (myPos.x + 15));
-            const myDir = { x: Math.cos(angle), y: Math.sin(angle) };
-
-            if(shootCooldown > 0) shootCooldown--;
-            if((keys['Space'] || keys['MouseDown']) && shootCooldown === 0) {
-                socket.emit('shoot', { dir: myDir });
-                shootCooldown = 6;
-            }
-
-            myPos.x = Math.max(0, Math.min(canvas.width - 30, myPos.x + dx));
-            myPos.y = Math.max(0, Math.min(canvas.height - 30, myPos.y + dy));
-            socket.emit('move', { x: myPos.x, y: myPos.y, dir: myDir });
-            
-            if(screenShake > 0) screenShake *= 0.9; 
-        }
-
-        function draw() {
-            update();
-            ctx.fillStyle = '#020205';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-            ctx.save();
-            // Apply Screen Shake
-            if(screenShake > 1) ctx.translate((Math.random()-0.5)*screenShake, (Math.random()-0.5)*screenShake);
-
-            // Draw Particles
-            particles.forEach((p, i) => {
-                p.update(); p.draw();
-                if(p.alpha <= 0) particles.splice(i, 1);
+            // Pickup detection
+            pickups = pickups.filter(p => {
+                let dist = Math.hypot(players[socket.id].x + 15 - p.x, players[socket.id].y + 15 - p.y);
+                if (dist < 30) {
+                    applyPowerup(socket.id, p.type);
+                    io.emit('updatePickups', pickups);
+                    return false;
+                }
+                return true;
             });
+        }
+    });
 
-            for(let id in players) {
-                const p = players[id];
-                if(p.isInvincible && Math.floor(Date.now()/100)%2==0) continue;
+    socket.on('shoot', (data) => {
+        const p = players[socket.id];
+        if (p) p.bullets.push({ x: p.x + 15, y: p.y + 15, vx: data.dir.x * 15, vy: data.dir.y * 15, life: 80 });
+    });
 
-                // HP Hearts
-                const active = Math.ceil((p.hp/100)*3);
-                for(let i=0; i<3; i++) drawHeart(p.x + (i*12), p.y - 15, i < active, p.color);
-
-                // Player
-                ctx.shadowBlur = 20; ctx.shadowColor = p.color;
-                ctx.fillStyle = p.color;
-                ctx.fillRect(p.x, p.y, 30, 30);
-
-                // Aim Arrow
-                ctx.save();
-                ctx.translate(p.x+15, p.y+15);
-                ctx.rotate(Math.atan2(p.dir.y, p.dir.x));
-                ctx.fillStyle = 'white';
-                ctx.beginPath(); ctx.moveTo(30,0); ctx.lineTo(20,-5); ctx.lineTo(20,5); ctx.fill();
-                ctx.restore();
-
-                // Bullets
-                p.bullets.forEach(b => {
-                    ctx.fillStyle = 'white'; ctx.shadowBlur = 15; ctx.shadowColor = 'white';
-                    ctx.beginPath(); ctx.arc(b.x, b.y, 6, 0, Math.PI*2); ctx.fill();
+    socket.on('activateSuper', () => {
+        const p = players[socket.id];
+        if (p && p.superCharge >= 5) {
+            p.superCharge = 0;
+            const baseAngle = Math.atan2(p.dir.y, p.dir.x);
+            for (let i = -2; i <= 2; i++) {
+                const angle = baseAngle + (i * 0.25);
+                p.bullets.push({ 
+                    x: p.x + 15, y: p.y + 15, 
+                    vx: Math.cos(angle) * 18, vy: Math.sin(angle) * 18, 
+                    life: 45, isSuper: true 
                 });
             }
-            ctx.restore();
-            requestAnimationFrame(draw);
         }
-        draw();
-    </script>
-</body>
-</html>
+    });
+
+    socket.on('disconnect', () => { delete players[socket.id]; io.emit('updatePlayers', players); });
+});
+
+function applyPowerup(id, type) {
+    const p = players[id];
+    if (!p) return;
+    if (type === 'SHIELD') {
+        p.isShielded = true;
+        setTimeout(() => { if(players[id]) p.isShielded = false; }, 5000);
+    } else if (type === 'SPEED') {
+        p.speedMult = 1.8;
+        setTimeout(() => { if(players[id]) p.speedMult = 1; }, 5000);
+    }
+}
+
+setInterval(() => {
+    for (let id in players) {
+        let p = players[id];
+        for (let bIndex = p.bullets.length - 1; bIndex >= 0; bIndex--) {
+            let b = p.bullets[bIndex];
+            b.x += b.vx; b.y += b.vy; b.life--;
+
+            for (let targetId in players) {
+                if (targetId !== id) {
+                    let t = players[targetId];
+                    let dist = Math.hypot(b.x - (t.x + 15), b.y - (t.y + 15));
+                    if (dist < 28 && !t.isInvincible && !t.isShielded) { 
+                        t.hp -= 34;
+                        p.bullets.splice(bIndex, 1);
+                        if (t.hp <= 0) {
+                            p.kills++; p.superCharge++;
+                            t.hp = 100; t.x = Math.random() * 800; t.y = Math.random() * 600;
+                            t.isInvincible = true;
+                            io.to(targetId).emit('respawn', { x: t.x, y: t.y });
+                            setTimeout(() => { if(players[targetId]) players[targetId].isInvincible = false; }, 1000);
+                        }
+                        break; 
+                    } else if (dist < 35 && t.isShielded) {
+                        p.bullets.splice(bIndex, 1);
+                    }
+                }
+            }
+            if (b && b.life <= 0) p.bullets.splice(bIndex, 1);
+        }
+    }
+    io.emit('updatePlayers', players);
+}, 1000 / 60);
+
+server.listen(process.env.PORT || 3000);
