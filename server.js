@@ -30,17 +30,19 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('shoot', () => {
-        const p = players[socket.id];
-        if(p && p.bullets.length < 10) { // Max 3 bullets on screen per player
-            p.bullets.push({ 
-                x: p.x + 15, y: p.y + 15, 
-                vx: p.dir.x * 12, 
-                vy: p.dir.y * 12,
-                life: 60 // Bullet disappears after 60 frames
-            });
-        }
-    });
+    socket.on('shoot', (data) => {
+    const p = players[socket.id];
+    // Check for 'data.dir' which we are now sending from index.html
+    if(p && data && data.dir) {
+        p.bullets.push({ 
+            x: p.x + 15, 
+            y: p.y + 15, 
+            vx: data.dir.x * 12, // Use the direction from the mouse
+            vy: data.dir.y * 12, 
+            life: 100 
+        });
+    }
+});
 
     socket.on('disconnect', () => {
         delete players[socket.id];
