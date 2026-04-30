@@ -1,22 +1,34 @@
 <!DOCTYPE html>
 <html>
 <head>
+    <title>Neon Arena</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #050505; font-family: sans-serif; }
-        #ui { position: absolute; top: 10px; left: 10px; color: #00ff88; pointer-events: none; }
+        body { margin: 0; overflow: hidden; background: #050505; font-family: 'Courier New', Courier, monospace; }
+        #ui { position: absolute; top: 20px; left: 20px; color: #00ff88; pointer-events: none; text-shadow: 0 0 10px #00ff88; }
+        #leaderboard { position: absolute; top: 20px; right: 20px; color: #ff00ff; text-align: right; text-shadow: 0 0 10px #ff00ff; }
+        .death-flash { position: absolute; inset: 0; background: red; opacity: 0; pointer-events: none; transition: opacity 0.3s; }
     </style>
 </head>
 <body>
-    <div id="ui">Players Online: <span id="count">0</span></div>
+    <div id="flash" class="death-flash"></div>
+    <div id="ui">
+        ONLINE: <span id="count">0</span><br>
+        MOVE: WASD | SHOOT: SPACE
+    </div>
+    <div id="leaderboard">
+        LEADERBOARD<br><div id="list"></div>
+    </div>
     <canvas id="g"></canvas>
+
     <script src="/socket.io/socket.io.js"></script>
     <script>
         const socket = io();
         const canvas = document.getElementById('g');
         const ctx = canvas.getContext('2d');
+        const flash = document.getElementById('flash');
         
-        let myId = null;
-        let myPos = { x: Math.random() * 500, y: Math.random() * 500 };
+        let myPos = { x: 400, y: 300 };
+        let myDir = { x: 1, y: 0 };
         let players = {};
         const keys = {};
 
@@ -27,11 +39,25 @@
         window.addEventListener('resize', resize);
         resize();
 
-        socket.on('connect', () => { myId = socket.id; });
         socket.on('updatePlayers', (data) => { 
             players = data; 
             document.getElementById('count').innerText = Object.keys(data).length;
+            updateLeaderboard();
         });
+
+        socket.on('death', () => {
+            flash.style.opacity = '0.5';
+            setTimeout(() => flash.style.opacity = '0', 100);
+        });
+
+        function updateLeaderboard() {
+            const list = Object.values(players)
+                .sort((a, b) => b.kills - a.kills)
+                .slice(0, 5)
+                .map(p => `${p.name}: ${p.kills}`)
+                .join('<br>');
+            document.getElementById('list').innerHTML = list;
+        }
 
         window.addEventListener('keydown', e => {
             keys[e.code] = true;
@@ -41,36 +67,47 @@
 
         function update() {
             let moved = false;
-            if(keys['ArrowUp'] || keys['KeyW']) { myPos.y -= 5; moved = true; }
-            if(keys['ArrowDown'] || keys['KeyS']) { myPos.y += 5; moved = true; }
-            if(keys['ArrowLeft'] || keys['KeyA']) { myPos.x -= 5; moved = true; }
-            if(keys['ArrowRight'] || keys['KeyD']) { myPos.x += 5; moved = true; }
-            
-            if(moved) socket.emit('move', myPos);
+            let dx = 0, dy = 0;
+
+            if(keys['KeyW']) { dy = -6; moved = true; }
+            if(keys['KeyS']) { dy = 6; moved = true; }
+            if(keys['KeyA']) { dx = -6; moved = true; }
+            if(keys['KeyD']) { dx = 6; moved = true; }
+
+            if(moved) {
+                // Update Position with BORDER LOCK
+                myPos.x = Math.max(0, Math.min(canvas.width - 30, myPos.x + dx));
+                myPos.y = Math.max(0, Math.min(canvas.height - 30, myPos.y + dy));
+                
+                // Update Facing Direction
+                myDir = { x: dx !== 0 ? dx/6 : 0, y: dy !== 0 ? dy/6 : 0 };
+                
+                socket.emit('move', { x: myPos.x, y: myPos.y, dir: myDir });
+            }
         }
 
         function draw() {
             update();
-            ctx.fillStyle = 'rgba(5, 5, 5, 0.3)'; // Trail effect
+            ctx.fillStyle = 'rgba(5, 5, 5, 0.4)'; // Motion blur
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             
             for(let id in players) {
                 const p = players[id];
                 
-                // Draw Player
-                ctx.fillStyle = p.color;
+                // Player Glow
                 ctx.shadowBlur = 15;
                 ctx.shadowColor = p.color;
+                ctx.fillStyle = p.color;
                 ctx.fillRect(p.x, p.y, 30, 30);
                 
-                // Draw Health Bar
-                ctx.fillStyle = '#333';
-                ctx.fillRect(p.x, p.y - 10, 30, 4);
-                ctx.fillStyle = '#00ff88';
-                ctx.fillRect(p.x, p.y - 10, (p.hp / 100) * 30, 4);
+                // Direction Indicator (Small dot)
+                ctx.fillStyle = 'white';
+                ctx.fillRect(p.x + 12 + (p.dir.x * 10), p.y + 12 + (p.dir.y * 10), 6, 6);
 
-                // Draw Bullets
+                // Bullets
                 p.bullets.forEach(b => {
+                    ctx.shadowBlur = 10;
+                    ctx.shadowColor = 'white';
                     ctx.fillStyle = 'white';
                     ctx.beginPath();
                     ctx.arc(b.x, b.y, 4, 0, Math.PI*2);
